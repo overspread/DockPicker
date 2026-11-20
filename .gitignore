@@ -1,0 +1,22 @@
+# Build outputs
+build/
+RuntimeBuild/
+DerivedData/
+
+# Local/private material
+backups/
+DockVisibilityLab/
+*.dmg
+*.zip
+*.p12
+*.pem
+*.key
+
+# macOS metadata
+.DS_Store
+
+# Xcode / editor
+xcuserdata/
+*.xcuserstate
+.vscode/
+.idea/
