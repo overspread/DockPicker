@@ -1,34 +1,32 @@
 # DockPicker 1.0.0
 
-DockPicker 1.0 is a macOS menu-bar utility for requesting per-application visibility changes in the **native macOS Dock** for currently running applications.
+DockPicker is a macOS menu-bar utility for controlling whether the icons of **currently running applications** appear in the native macOS Dock.
 
-The user-facing application is the first release. Its LaunchServices notification mechanism remains undocumented by Apple and may change in future macOS versions.
-
-## Status and Compatibility
-
-This project relies on undocumented LaunchServices notification behavior. It is not an Apple-supported API and may stop working or behave differently after a macOS update.
-
-Verified locally on macOS 27.2.1 (build 26B131, Apple Silicon). Other macOS releases and Intel Macs are unverified. The app bundle declares macOS 27.0 as its minimum version; this is a conservative compatibility gate, not a claim that every 27.x release was tested.
+The first release is now available. It works through an undocumented LaunchServices notification, so Apple may change this behavior in a future macOS update.
 
 ## Features
 
-- Search currently running regular applications.
-- Filter the list by **All**, **Visible**, or **Hidden**.
-- Show app icons, process IDs, and visible/hidden counts.
-- Toggle an app's Dock tile and verify the result through Accessibility when available.
+- Search running regular applications.
+- Filter by **All**, **Visible**, or **Hidden**.
+- Show app icons, process IDs, and visibility counts.
+- Toggle an app’s Dock tile and verify the result through Accessibility when available.
 - Restore all choices before quitting.
 
-Only running applications can be controlled by this runtime approach. Apps that are not running are not listed.
+Only running applications can be controlled. Applications that are not running are not listed.
 
-## Important Risks
+## Compatibility
 
-The notification is not a documented per-tile visibility API. The Dock handles a visibility change through internal application-exit bookkeeping. The target process remains alive with its normal activation policy, but the Dock also updates internal minimized-window and Spaces records. This may affect minimized windows, App Exposé, Spaces, drag state, or other Dock-managed behavior.
+Verified locally on macOS 27.2.1 (build 26B131, Apple Silicon). The bundle declares macOS 27.0 as its minimum version. Other macOS releases and Intel Macs are unverified.
 
-The independent test app passed visibility round-trips, same-PID checks, window input, activation, menu commands, full-screen transitions, and additional-window checks. The maintainer reports an actual-use test without noticeable side effects on this Mac; this does not guarantee every target app is unaffected. The test environment's native minimize action did not work in the control case, so minimization compatibility is **not verified**.
+## Usage Notes
 
-A per-app confirmation appears the first time you hide each app during a DockPicker session. Test non-critical apps first. Use **Restore All** if behavior is unexpected. The target app or Dock can restart and make a tile reappear. If Accessibility permission is unavailable, the app falls back to saved choices; check the native Dock to confirm the actual state.
+The notification is not a documented per-tile visibility API. The target process remains alive with its normal activation policy, but the Dock may update internal minimized-window, Spaces, App Exposé, and drag-state records.
 
-Do not rely on this for critical work without testing that specific app and workflow. Chat, proxy, development, and production-critical apps may have app-specific behavior. The project has not automatically changed WeChat or any other installed target application.
+An independent test app passed visibility round-trips, same-PID checks, window input, activation, menu commands, full-screen transitions, and additional-window checks. The maintainer also tested actual use on this Mac without noticing side effects. These checks do not guarantee that every app or workflow is unaffected. Minimize compatibility is **not verified** because the control case did not respond to the native minimize action.
+
+DockPicker asks for confirmation the first time each app is hidden during a session. Test non-critical apps first. Use **Restore All** if behavior is unexpected. The target app or Dock may restart and make a tile reappear. Without Accessibility permission, the app shows saved choices instead of the verified Dock state.
+
+Do not rely on this for critical work without testing that specific app and workflow. Chat, proxy, development, and production-critical apps may behave differently. The project has not automatically changed WeChat or any other installed target application.
 
 ## Permissions
 
