@@ -1,8 +1,8 @@
-# DockPicker
+# DockPicker 1.0.0
 
-DockPicker is an experimental macOS menu-bar utility that requests per-application visibility changes in the **native macOS Dock** for currently running applications.
+DockPicker 1.0 is a macOS menu-bar utility for requesting per-application visibility changes in the **native macOS Dock** for currently running applications.
 
-It does not replace the system Dock, draw an overlay, modify target application bundles, re-sign applications, change file ownership, or restart target applications.
+The user-facing application is the first release. Its LaunchServices notification mechanism remains undocumented by Apple and may change in future macOS versions.
 
 ## Status and Compatibility
 
@@ -24,7 +24,7 @@ Only running applications can be controlled by this runtime approach. Apps that 
 
 The notification is not a documented per-tile visibility API. The Dock handles a visibility change through internal application-exit bookkeeping. The target process remains alive with its normal activation policy, but the Dock also updates internal minimized-window and Spaces records. This may affect minimized windows, App Exposé, Spaces, drag state, or other Dock-managed behavior.
 
-The independent test app passed visibility round-trips, same-PID checks, window input, activation, menu commands, full-screen transitions, and additional-window checks. The test environment's native minimize action did not work in the control case, so minimization compatibility is **not verified**. These tests do not establish that every target app is unaffected.
+The independent test app passed visibility round-trips, same-PID checks, window input, activation, menu commands, full-screen transitions, and additional-window checks. The maintainer reports an actual-use test without noticeable side effects on this Mac; this does not guarantee every target app is unaffected. The test environment's native minimize action did not work in the control case, so minimization compatibility is **not verified**.
 
 A per-app confirmation appears the first time you hide each app during a DockPicker session. Test non-critical apps first. Use **Restore All** if behavior is unexpected. The target app or Dock can restart and make a tile reappear. If Accessibility permission is unavailable, the app falls back to saved choices; check the native Dock to confirm the actual state.
 
@@ -38,9 +38,11 @@ Accessibility permission is used only to read native Dock items for state verifi
 
 Hiding does not require administrator privileges, App Management permission, target-bundle write access, code signing changes to the target app, or Keychain access.
 
-## Build
+## Release
 
-Requirements: macOS 27.0 or later and Xcode Command Line Tools.
+Version: **1.0.0**. This release has been built and verified locally. The local source repository is version-controlled; publishing or pushing it to a remote repository is a separate, explicit action.
+
+The app bundle uses version `1.0.0` (build `1`).
 
 ```sh
 make build

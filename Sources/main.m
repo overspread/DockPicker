@@ -10,7 +10,7 @@
 // separate from the application's real activation policy. This is experimental
 // system integration: the Dock also updates internal window/Spaces bookkeeping.
 
-static NSString *const HiddenPathsKey=@"runtime.hiddenApplicationPaths";
+static NSString *const HiddenPathsKey=@"runtime.hiddenApplicationPaths.v2";
 static const void *EntryKey=&EntryKey;
 static id AXValue(AXUIElementRef e,CFStringRef k){CFTypeRef v=NULL;return AXUIElementCopyAttributeValue(e,k,&v)==kAXErrorSuccess?CFBridgingRelease(v):nil;}
 static void CollectDockPaths(AXUIElementRef e,int depth,NSMutableSet *paths){
@@ -117,7 +117,7 @@ static BOOL SendRuntimeNotification(NSDictionary *entry,BOOL shown,NSString **er
  return self.dockPaths ? [self.dockPaths containsObject:path] : ![self.hiddenPaths containsObject:path];
 }
 - (void)reload:(id)sender{
- if(self.busy)return;self.dockPaths=VisibleDockPaths();NSString *query=self.search.stringValue?:@"";NSMutableArray *filtered=[NSMutableArray array];
+ if(self.busy)return;self.dockPaths=VisibleDockPaths();self.filterControl.enabled=(self.dockPaths!=nil);if(!self.dockPaths)self.filterControl.selectedSegment=0;NSString *query=self.search.stringValue?:@"";NSMutableArray *filtered=[NSMutableArray array];
  NSArray *all=[self runningEntries];self.allEntries=all;NSInteger mode=self.filterControl.selectedSegment;
  NSInteger shownCount=0;for(NSDictionary *entry in all){if([self isEntryShown:entry])shownCount++;}
  for(NSDictionary *entry in all){
@@ -129,7 +129,8 @@ static BOOL SendRuntimeNotification(NSDictionary *entry,BOOL shown,NSString **er
  }
  self.entries=filtered;[self.table reloadData];
  if(self.operationMessage.length)self.status.stringValue=self.operationMessage;
- else self.status.stringValue=[NSString stringWithFormat:@"运行中 %lu · 显示中 %ld · 已隐藏 %lu · %@",(unsigned long)all.count,(long)shownCount,(unsigned long)(all.count-shownCount),self.dockPaths?@"已读取原生 Dock 状态":@"按本工具保存的选择显示"];
+  else if(self.dockPaths)self.status.stringValue=[NSString stringWithFormat:@"运行中 %lu · 显示中 %ld · 已隐藏 %lu · 已读取原生 Dock 状态",(unsigned long)all.count,(long)shownCount,(unsigned long)(all.count-shownCount)];
+  else{NSInteger selectedHidden=0;for(NSDictionary *entry in all)if([self.hiddenPaths containsObject:entry[@"path"]])selectedHidden++;self.status.stringValue=[NSString stringWithFormat:@"运行中 %lu · 显示选择 %lu · 隐藏选择 %ld · 尚未读取 Dock 实际状态（可授权辅助功能）",(unsigned long)all.count,(unsigned long)(all.count-selectedHidden),(long)selectedHidden];}
  self.restoreButton.enabled=self.hiddenPaths.count>0;
 }
 - (void)timerRefresh:(id)sender{if(!self.busy)[self reload:nil];}
@@ -162,24 +163,33 @@ static BOOL SendRuntimeNotification(NSDictionary *entry,BOOL shown,NSString **er
    for(NSDictionary *entry in successful){if(shown)[self.hiddenPaths removeObject:entry[@"path"]];else[self.hiddenPaths addObject:entry[@"path"]];}
    [self saveChoices];self.busy=NO;self.refreshButton.enabled=YES;
    BOOL ok=errors.count==0;
-   self.operationMessage=ok?(visible?(shown?@"已核验：原生 Dock 图标已恢复。":@"已核验：原生 Dock 图标已隐藏。"):@"通知已发送；请在原生 Dock 检查显示效果。"):[errors componentsJoinedByString:@" "];
+   self.operationMessage=ok?(visible?(shown?@"已核验：原生 Dock 图标已恢复。":@"已核验：原生 Dock 图标已隐藏。"):@"通知已发送，但未核验 Dock 状态；可在辅助功能中允许 DockPicker 读取。"):[errors componentsJoinedByString:@" "];
    [self reload:nil];if(completion)completion(ok);
   });
  });
 }
 - (void)toggle:(NSSwitch*)sender{NSDictionary *entry=objc_getAssociatedObject(sender,EntryKey);if(!entry)return;BOOL shown=sender.state==NSControlStateValueOn;
- if(!shown&&![self.acceptedPaths containsObject:entry[@"path"]]){NSAlert*a=[NSAlert new];a.messageText=[NSString stringWithFormat:@"在原生 Dock 隐藏“%@”？",entry[@"name"]];a.informativeText=@"这会通过未公开的 macOS 运行时通知隐藏图标，不修改或重启应用。Dock 仍会执行内部退出清理，可能影响该应用的最小化窗口、Spaces 或 App Exposé。该应用已在本机测试程序以外未经完整验证；是否只对这个应用继续？";[a addButtonWithTitle:@"继续此应用试验"];[a addButtonWithTitle:@"取消"];if([a runModal]!=NSAlertFirstButtonReturn){[self reload:nil];return;}[self.acceptedPaths addObject:entry[@"path"]];}
+ if(!shown&&![self.acceptedPaths containsObject:entry[@"path"]]){NSAlert*a=[NSAlert new];a.messageText=[NSString stringWithFormat:@"在原生 Dock 隐藏“%@”？",entry[@"name"]];a.informativeText=@"这会通过未公开的 macOS 运行时通知隐藏图标，不修改或重启应用。Dock 仍会执行内部退出清理，可能影响该应用的最小化窗口、Spaces 或 App Exposé。该应用已在本机测试程序以外未经完整验证；是否只对这个应用继续？";[a addButtonWithTitle:@"继续此应用试验"];[a addButtonWithTitle:@"取消"];[self showPanel:nil];[a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response){if(response!=NSAlertFirstButtonReturn){[self reload:nil];return;}[self.acceptedPaths addObject:entry[@"path"]];[self changeEntries:@[entry] shown:NO completion:nil];}];return;}
  [self changeEntries:@[entry] shown:shown completion:nil];}
 - (void)restoreAll:(id)sender{
  NSMutableArray *targets=[NSMutableArray array];for(NSDictionary *e in[self runningEntries])if([self.hiddenPaths containsObject:e[@"path"]])[targets addObject:e];
  if(targets.count==0){[self.hiddenPaths removeAllObjects];[self saveChoices];[self reload:nil];return;}
  [self changeEntries:targets shown:YES completion:^(BOOL ok){if(ok){[self.hiddenPaths removeAllObjects];[self saveChoices];[self reload:nil];}}];
 }
-- (void)showPanel:(id)sender{[self.window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];}
+- (void)requestDockAccessibility:(id)sender{
+ if(AXIsProcessTrusted()){self.operationMessage=@"已允许读取原生 Dock 状态。";[self reload:nil];return;}
+ NSDictionary *options=@{(__bridge NSString*)kAXTrustedCheckOptionPrompt:@YES};
+ AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+ NSURL *url=[NSURL URLWithString:@"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"];
+ if(url)[NSWorkspace.sharedWorkspace openURL:url];
+ self.operationMessage=@"请在系统设置的“隐私与安全性 → 辅助功能”中允许 DockPicker；授权后重新打开本工具，再核验图标状态。";
+ [self reload:nil];
+}
+- (void)showPanel:(id)sender{[self.window makeKeyAndOrderFront:nil];[NSApp activate];[NSApp activateIgnoringOtherApps:YES];}
 - (BOOL)applicationShouldHandleReopen:(NSApplication*)sender hasVisibleWindows:(BOOL)visible{[self showPanel:nil];return YES;}
 - (void)help:(id)sender{
- NSAlert *a=[NSAlert new];a.messageText=@"运行时实验版说明";
- a.informativeText=@"只控制当前运行应用在原生 Dock 中的显示。不会修改、重签名、重启应用，也不需要管理员密码。\n\n这是未公开的系统通知机制，Dock 还会更新内部窗口和桌面空间记录。测试程序已验证显示/隐藏往返、窗口输入、菜单和全屏，但不能保证所有应用的最小化、App Exposé、桌面空间和系统更新后的兼容性。\n\n目标应用或 Dock 重启后图标可能回来；可重新切换。若异常，先点「全部恢复」。退出本工具时会请求恢复它隐藏的图标。\n\n如果没有辅助功能读取权限，界面按本工具的选择显示状态，实际效果请查看原生 Dock。";[a runModal];
+ NSAlert *a=[NSAlert new];a.messageText=@"DockPicker 1.0 说明";
+ a.informativeText=@"只控制当前运行应用在原生 Dock 中的显示；不修改、重签名或重启目标应用，不需要管理员密码。\n\n首次隐藏每个应用前会询问确认。你已在当前设备实际测试并反馈通知未影响使用；不同应用、最小化窗口/Spaces及未来 macOS 版本仍可能有差异。\n\n菜单栏 ▦ →“授权读取 Dock 状态”可打开辅助功能设置。该权限只用于核验原生 Dock 图标；未授权时，底部会明确显示尚未读取实际状态，列表仅显示本工具的保存选择。\n\n目标应用或 Dock 重启后图标可能重新出现；“全部恢复”会重新请求显示。退出本工具时会尝试恢复仍运行的已隐藏应用。";[a runModal];
 }
 - (void)quit:(id)sender{[NSApp terminate:nil];}
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender{
@@ -191,12 +201,12 @@ static BOOL SendRuntimeNotification(NSDictionary *entry,BOOL shown,NSString **er
 }
 - (void)buildStatusMenu{
  self.statusItem=[NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];self.statusItem.button.title=@"▦";self.statusItem.button.toolTip=@"DockPicker · 原生 Dock 运行时控制";
- NSMenu *m=[NSMenu new];for(NSArray *item in @[@[@"打开控制面板",NSStringFromSelector(@selector(showPanel:))],@[@"全部恢复",NSStringFromSelector(@selector(restoreAll:))],@[@"说明",NSStringFromSelector(@selector(help:))],@[@"恢复并退出",NSStringFromSelector(@selector(quit:))]]){NSMenuItem *i=[[NSMenuItem alloc]initWithTitle:item[0] action:NSSelectorFromString(item[1]) keyEquivalent:@""];i.target=self;[m addItem:i];}self.statusItem.menu=m;
+ NSMenu *m=[NSMenu new];for(NSArray *item in @[@[@"打开控制面板",NSStringFromSelector(@selector(showPanel:))],@[@"授权读取 Dock 状态",NSStringFromSelector(@selector(requestDockAccessibility:))],@[@"全部恢复",NSStringFromSelector(@selector(restoreAll:))],@[@"说明",NSStringFromSelector(@selector(help:))],@[@"恢复并退出",NSStringFromSelector(@selector(quit:))]]){NSMenuItem *i=[[NSMenuItem alloc]initWithTitle:item[0] action:NSSelectorFromString(item[1]) keyEquivalent:@""];i.target=self;[m addItem:i];}self.statusItem.menu=m;
 }
 - (void)buildWindow{
  self.window=[[NSWindow alloc]initWithContentRect:NSMakeRect(0,0,660,570) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];self.window.title=@"DockPicker — 原生 Dock 图标控制";self.window.releasedWhenClosed=NO;self.window.minSize=NSMakeSize(560,380);[self.window center];NSView*c=self.window.contentView;
  NSTextField *title=[NSTextField labelWithString:@"选择应用在原生 Dock 中的显示"];title.font=[NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
- NSTextField *subtitle=[NSTextField labelWithString:@"运行时实验版 · 不改应用文件；最小化和桌面空间兼容性仍需观察"];subtitle.font=[NSFont systemFontOfSize:11];subtitle.textColor=NSColor.secondaryLabelColor;
+ NSTextField *subtitle=[NSTextField labelWithString:@"DockPicker 1.0 · 直接控制原生 Dock，不改应用文件"];subtitle.font=[NSFont systemFontOfSize:11];subtitle.textColor=NSColor.secondaryLabelColor;
  self.search=[NSSearchField new];self.search.placeholderString=@"搜索运行中的应用";
   self.filterControl=[NSSegmentedControl segmentedControlWithLabels:@[@"全部",@"显示中",@"已隐藏"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(filterChanged:)];self.filterControl.selectedSegment=0;self.filterControl.toolTip=@"筛选当前运行中的应用";
  self.refreshButton=[NSButton buttonWithTitle:@"刷新" target:self action:@selector(reload:)];self.restoreButton=[NSButton buttonWithTitle:@"全部恢复" target:self action:@selector(restoreAll:)];
