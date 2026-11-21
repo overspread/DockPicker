@@ -1,63 +1,67 @@
 # DockPicker 1.0.0
 
-DockPicker is a macOS menu-bar utility for controlling whether the icons of **currently running applications** appear in the native macOS Dock.
+DockPicker 是一个 macOS 菜单栏工具，用于控制**当前正在运行的应用**是否显示在原生 Dock 中。
 
-The first release is now available. It works through an undocumented LaunchServices notification, so Apple may change this behavior in a future macOS update.
+首个正式版已发布。它通过未公开的 LaunchServices 通知实现；Apple 可能会在未来 macOS 更新中改变该行为，不同应用的兼容性也可能不同。
 
-## Features
+## 功能
 
-- Search running regular applications.
-- Filter by **All**, **Visible**, or **Hidden**.
-- Show app icons, process IDs, and visibility counts.
-- Toggle an app’s Dock tile and verify the result through Accessibility when available.
-- Restore all choices before quitting.
+- 搜索当前正在运行的普通应用。
+- 按**全部**、**显示中**、**已隐藏**筛选列表。
+- 显示应用图标、进程 ID 和显示/隐藏数量。
+- 切换应用的 Dock 图标；在可用时通过辅助功能核验实际结果。
+- 退出前恢复所有选择。
 
-Only running applications can be controlled. Applications that are not running are not listed.
+运行时方案只能控制正在运行的应用；未运行的应用不会出现在列表中。
 
-## Compatibility
+## 兼容性
 
-Verified locally on macOS 27.2.1 (build 26B131, Apple Silicon). The bundle declares macOS 27.0 as its minimum version. Other macOS releases and Intel Macs are unverified.
+已在 macOS 27.2.1（build 26B131，Apple Silicon）本地验证。应用包声明的最低版本是 macOS 27.0；其他 macOS 版本和 Intel Mac 未经测试。
 
-## Usage Notes
+**未来 macOS 更新可能导致本工具失效或行为变化。** 该通知机制未公开，Apple 随时可能修改或移除相关行为。系统更新后，请先确认隐藏功能仍然有效。
 
-The notification is not a documented per-tile visibility API. The target process remains alive with its normal activation policy, but the Dock may update internal minimized-window, Spaces, App Exposé, and drag-state records.
+**不同应用的兼容性可能不同。** 应用可能忽略显示请求、重新显示 Dock 图标，或在最小化窗口、Spaces、App Exposé、全屏窗口等场景表现不同。长期使用前，请对每个目标应用分别测试。
 
-An independent test app passed visibility round-trips, same-PID checks, window input, activation, menu commands, full-screen transitions, and additional-window checks. The maintainer also tested actual use on this Mac without noticing side effects. These checks do not guarantee that every app or workflow is unaffected. Minimize compatibility is **not verified** because the control case did not respond to the native minimize action.
+## 使用注意
 
-DockPicker asks for confirmation the first time each app is hidden during a session. Test non-critical apps first. Use **Restore All** if behavior is unexpected. The target app or Dock may restart and make a tile reappear. Without Accessibility permission, the app shows saved choices instead of the verified Dock state.
+该通知不是公开的“单图标可见性 API”。目标进程会继续以正常 activation policy 运行，但 Dock 可能更新其内部的最小化窗口、Spaces、App Exposé 和拖拽状态记录。
 
-Do not rely on this for critical work without testing that specific app and workflow. Chat, proxy, development, and production-critical apps may behave differently. The project has not automatically changed WeChat or any other installed target application.
+独立测试应用已通过显示/隐藏往返、相同 PID 检查、窗口输入、激活、菜单命令、全屏切换和额外窗口检查。维护者也在本机进行过实际使用测试，未注意到副作用；但这不能保证每个应用或工作流都不受影响。对照环境中原生最小化操作未正常响应，因此最小化兼容性**未验证**。
 
-## Permissions
+DockPicker 会在当前会话中首次隐藏每个应用前单独确认。请先测试非关键应用。如行为异常，请使用**全部恢复**。目标应用或 Dock 重启后，图标可能重新出现。没有辅助功能权限时，应用会显示保存的选择而不是已核验的 Dock 状态。
 
-Accessibility permission is used only to read native Dock items for state verification:
+请勿在未经测试的情况下将其用于关键工作。聊天、代理、开发和生产关键应用可能有不同表现。本项目没有自动修改微信或任何其他已安装的目标应用。
 
-**System Settings → Privacy & Security → Accessibility**
+## 权限
 
-Hiding does not require administrator privileges, App Management permission, target-bundle write access, code signing changes to the target app, or Keychain access.
+辅助功能权限仅用于读取原生 Dock 图标以核验状态：
 
-## Release
+**系统设置 → 隐私与安全性 → 辅助功能**
 
-Version: **1.0.0**. This release has been built and verified locally. The local source repository is version-controlled; publishing or pushing it to a remote repository is a separate, explicit action.
+隐藏操作不需要管理员密码、App 管理权限、目标应用包写入权限、目标应用签名变更或钥匙串访问。
 
-The app bundle uses version `1.0.0` (build `1`).
+## 发布
+
+版本：**1.0.0**。该版本已在本地构建并验证。源码使用本地 Git 管理；发布或推送到远程仓库是另一个单独且明确的操作。
+
+应用包版本为 `1.0.0`（build `1`）。
 
 ```sh
 make build
 open build/DockPicker.app
 ```
 
-The local build is ad-hoc signed. For redistribution, use your own Developer ID signing and notarization workflow. This repository does not include a prebuilt binary.
+本地构建为 ad-hoc 签名。若要分发，请使用你自己的 Developer ID 签名和公证流程。本仓库不包含预构建二进制。
 
-## Project Safety
+## 项目安全
 
-- Never edit or re-sign target application bundles as part of this project.
-- Never add application `Info.plist` backups, private application data, screenshots containing user data, signing keys, or certificates to the repository.
-- Treat LaunchServices behavior as undocumented and version-specific.
-- The bundled `Resources/Info.plist` uses the neutral identifier `org.dockpicker.app`.
+- 不要在本项目中编辑或重签名目标应用包。
+- 不要向仓库添加应用 `Info.plist` 备份、私有应用数据、含用户数据的截图、签名密钥或证书。
+- LaunchServices 行为应视为未公开且与系统版本相关。
+- 应用包中的 `Resources/Info.plist` 使用中立标识符 `org.dockpicker.app`。
 
-## License
+## 许可证
 
-MIT. See [LICENSE](LICENSE).
+MIT。见 [LICENSE](LICENSE)。
 
-DockPicker is not affiliated with, endorsed by, or supported by Apple.
+DockPicker 与 Apple 无关，也未获得 Apple 认可或支持。
