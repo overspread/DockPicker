@@ -1,10 +1,10 @@
-# DockPicker 1.0.2 Preview 1
+# DockPicker 1.0.2 Preview 2
 
 DockPicker 是一个 macOS 菜单栏工具，用于控制**当前正在运行的应用**是否显示在原生 Dock 中。
 
-当前预览版为 **1.0.2-preview.1**，用于测试下一正式版的持续隐藏功能；最新正式版仍为 **1.0.1**。
+当前预览版为 **1.0.2-preview.2**，沿用持续隐藏功能并修正发布签名；最新正式版仍为 **1.0.1**。
 
-- [下载 1.0.2-preview.1 预览版及查看更新说明](https://github.com/overspread/DockPicker/releases/tag/v1.0.2-preview.1)
+- [下载 1.0.2-preview.2 预览版及查看更新说明](https://github.com/overspread/DockPicker/releases/tag/v1.0.2-preview.2)
 - [下载 1.0.1 正式版](https://github.com/overspread/DockPicker/releases/tag/v1.0.1)
 - [完整更新日志](CHANGELOG.md)
 
@@ -29,7 +29,7 @@ DockPicker 是一个 macOS 菜单栏工具，用于控制**当前正在运行的
 
 正式版 1.0.1 曾在 macOS 27.2.1（build 26B131，Apple Silicon）本地验证。应用包声明的最低版本是 macOS 27.0；其他 macOS 版本和 Intel Mac 未经测试。
 
-本预览版仅完成编译、临时代码签名和安装包结构核验；新增自动隐藏的应用重开、Dock 重启和权限变化场景尚未完成实际运行验证，欢迎测试后反馈。
+本预览版完成编译、原固定证书签名、签名校验和安装包结构核验；自动隐藏的应用重开、Dock 重启和权限变化场景尚未完成独立的完整运行验证，欢迎测试后反馈。
 
 **未来 macOS 更新可能导致本工具失效或行为变化。** 该通知机制未公开，Apple 随时可能修改或移除相关行为。系统更新后，请先确认隐藏功能仍然有效。
 
@@ -55,22 +55,24 @@ DockPicker 会在当前会话中首次通过列表隐藏每个应用前单独确
 
 ## 发布
 
-预览版：**1.0.2-preview.1**，GitHub 标记为 **Pre-release**；正式版 **1.0.1** 保持 **Latest**。更新内容按新增功能、功能调整、移除功能和 Bug 修复记录在 GitHub 发布页及本仓库更新日志中。
+预览版：**1.0.2-preview.2**，GitHub 标记为 **Pre-release**；正式版 **1.0.1** 保持 **Latest**。更新内容按新增功能、功能调整、移除功能和 Bug 修复记录在 GitHub 发布页及本仓库更新日志中。
 
-预览应用包版本为 `1.0.2`（build `3`），界面标注 **Preview 1**；下载附件为 `DockPicker-1.0.2-preview.1.pkg`，安装到“应用程序”并替换原 DockPicker。安装前请先退出正在运行的 DockPicker。
+预览应用包版本为 `1.0.2`（build `4`），界面标注 **Preview 2**；下载附件为 `DockPicker-1.0.2-preview.2.pkg`，安装到“应用程序”并替换原 DockPicker。安装前请先退出正在运行的 DockPicker。
 
-**本次预览包采用 ad-hoc 临时签名，安装包未使用 Developer ID 签名，也未经过 Apple 公证。** 原固定自签名材料在发布环境中不可用，本次没有重新创建证书或修改默认签名配置。临时签名无法保证沿用旧辅助功能授权；安装后如授权无效，请在“系统设置 → 隐私与安全性 → 辅助功能”中移除旧 DockPicker，再添加当前“应用程序”里的 DockPicker。后续更新也可能需要重新授权。
+**本次应用包恢复使用原固定自签名证书及私钥，未使用 Developer ID 签名，也未经过 Apple 公证；PKG 安装器本身未签名。** Preview 1 曾错误采用 ad-hoc 临时签名，并将原签名材料误判为不可用；现已确认原身份保存在发布者的登录钥匙串中，Preview 2 复用同一身份，未新建证书。
+
+从 Preview 1 的临时签名切换回来，仍可能需要重新授权一次。安装后如授权无效，请在“系统设置 → 隐私与安全性 → 辅助功能”中移除旧 DockPicker，再添加当前“应用程序”里的 DockPicker。保持同一证书和应用标识有助于后续更新沿用授权，但不能保证所有系统环境都无需重新授权。
 
 ```sh
 make build
 open build/DockPicker.app
 ```
 
-默认构建配置仍使用固定的自签名证书 **DockPicker Code Signing**，按证书指纹选择身份；固定签名材料可用时，正式构建应沿用这一身份。请始终保留并复用同一证书和私钥，同时保持应用标识 `org.dockpicker.app` 不变；切换到这张证书后需要重新授予一次辅助功能权限，后续更新通常可沿用授权。
+默认构建固定使用自签名证书 **DockPicker Code Signing**，SHA-1 指纹为 `445DE6AF6FBFAF2758DDF96541D4E19ACE2ADBB2`，应用标识保持 `org.dockpicker.app`。请始终保留并复用同一证书和私钥；重新创建同名证书不能延续原身份。
 
-本机使用 DockPicker 专用的独立签名钥匙串。它与本地解锁文件均保存在 `~/Library/Application Support/DockPicker/Signing/`，目录仅当前用户可访问；构建会自动解锁该钥匙串并签名，无需修改系统证书信任设置。私钥和解锁文件不包含在源码仓库或分享给用户的应用包中；公开证书会随应用的代码签名提供。发布者应安全备份该目录中的证书和私钥，换电脑时导入原身份；重新创建同名证书不能延续原身份。
+发布者现有身份位于 `~/Library/Keychains/login.keychain-db`，构建默认从该登录钥匙串签名，不再依赖旧的独立签名目录或解锁文件。构建时 macOS 可能请求允许 codesign 访问私钥；此提示仅涉及发布构建，运行 DockPicker 无需访问钥匙串。无需为构建修改系统证书信任设置。私钥和解锁文件不包含在源码仓库或分发包中；公开证书会随应用的代码签名提供。换电脑时应安全迁移原证书和私钥。
 
-其他开发者需自行准备代码签名身份。使用默认钥匙串中的证书时，可执行 `make build CODESIGN_IDENTITY="自己的证书名称或指纹" CODESIGN_KEYCHAIN=`；使用独立钥匙串时可覆写 `CODESIGN_KEYCHAIN` 和 `CODESIGN_PASSWORD_FILE`。默认身份或钥匙串不可用时构建会报错，不会静默退回临时签名。每次 `make build` 都会签名并核验，即使源码没有变化。
+其他开发者需自行准备代码签名身份。使用默认钥匙串搜索列表中的证书时，可执行 `make build CODESIGN_IDENTITY="自己的证书名称或指纹" CODESIGN_KEYCHAIN=`；使用独立钥匙串时可覆写 `CODESIGN_KEYCHAIN`，仅在需要自动解锁时显式设置 `CODESIGN_PASSWORD_FILE`。默认身份或钥匙串不可用时构建会报错，不会退回临时签名；空身份及 `CODESIGN_IDENTITY=-` 均被拒绝。每次 `make build` 都会签名并核验，即使源码没有变化。
 
 自签名版本可以免费分享，但没有 Apple Developer ID 和公证。接收者首次打开可能需要在“系统设置 → 隐私与安全性”中允许打开，再手动授予辅助功能权限；后续下载的新版本也可能出现安全提示。接收者无需导入发布者的证书或私钥。若以后采用 Developer ID 分发，可另行配置签名、公证流程。本仓库不包含预构建二进制。
 

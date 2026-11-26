@@ -6,9 +6,9 @@ CLANG ?= xcrun clang
 CODESIGN ?= codesign
 # DockPicker Code Signing: reuse this certificate to preserve the application identity.
 CODESIGN_IDENTITY ?= 445DE6AF6FBFAF2758DDF96541D4E19ACE2ADBB2
-SIGNING_DIR ?= $(HOME)/Library/Application Support/DockPicker/Signing
-CODESIGN_KEYCHAIN ?= $(SIGNING_DIR)/DockPicker-signing.keychain-db
-CODESIGN_PASSWORD_FILE ?= $(SIGNING_DIR)/keychain-password
+CODESIGN_KEYCHAIN ?= $(HOME)/Library/Keychains/login.keychain-db
+# Optional unlock file for a separately managed keychain; never needed for the default login keychain.
+CODESIGN_PASSWORD_FILE ?=
 
 FRAMEWORKS := -framework AppKit -framework Carbon -framework Security -framework ApplicationServices
 
@@ -25,7 +25,11 @@ $(BINARY): Sources/main.m Resources/Info.plist Makefile
 
 sign: $(BINARY)
 	@set -e; \
-	if [ -n "$(CODESIGN_KEYCHAIN)" ]; then \
+	case "$(CODESIGN_IDENTITY)" in \
+		""|-) printf '%s\n' 'A persistent code-signing identity is required; ad-hoc signing is disabled.' >&2; exit 1 ;; \
+	esac; \
+	if [ -n "$(CODESIGN_PASSWORD_FILE)" ]; then \
+		test -n "$(CODESIGN_KEYCHAIN)" || { printf '%s\n' 'An explicit keychain is required when using an unlock file.' >&2; exit 1; }; \
 		test -r "$(CODESIGN_PASSWORD_FILE)" || { printf '%s\n' 'DockPicker signing keychain password file is missing.' >&2; exit 1; }; \
 		IFS= read -r dockpicker_keychain_password < "$(CODESIGN_PASSWORD_FILE)"; \
 		/usr/bin/security unlock-keychain -p "$$dockpicker_keychain_password" "$(CODESIGN_KEYCHAIN)"; \
