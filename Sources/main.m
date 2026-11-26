@@ -9,9 +9,8 @@
 // The LaunchServices notification is kept separate from the application's
 // activation policy; Dock bookkeeping may still be updated by the system.
 
+// 长期保存用户的隐藏选择；PID 和重试时间仅用于本次运行，不能随应用退出删除规则。
 static NSString *const HiddenPathsKey=@"runtime.hiddenApplicationPaths.v2";
-// 记录被隐藏时该应用的 PID：应用退出再重开时 PID 会变，图标也会自行回来，
-// 靠它把过时记录丢掉，避免界面继续显示“已隐藏”。
 static NSString *const HiddenPidsKey=@"runtime.hiddenApplicationPids.v2";
 static const void *EntryKey=&EntryKey;
 static id AXValue(AXUIElementRef e,CFStringRef k){AXUIElementSetMessagingTimeout(e,0.08f);CFTypeRef v=NULL;return AXUIElementCopyAttributeValue(e,k,&v)==kAXErrorSuccess?CFBridgingRelease(v):nil;}
@@ -121,7 +120,7 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
  _nameLabel=[NSTextField labelWithString:@""];_nameLabel.font=[NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
  _detailLabel=[NSTextField labelWithString:@""];_detailLabel.font=[NSFont systemFontOfSize:10];_detailLabel.textColor=NSColor.secondaryLabelColor;
  _nameLabel.lineBreakMode=NSLineBreakByTruncatingTail;_detailLabel.lineBreakMode=NSLineBreakByTruncatingMiddle;
- _visibilitySwitch=[NSSwitch new];_visibilitySwitch.toolTip=@"开启：在 Dock 显示；关闭：从 Dock 隐藏（应用继续运行）。";
+ _visibilitySwitch=[NSSwitch new];_visibilitySwitch.toolTip=@"开启：显示并取消自动隐藏；关闭：持续隐藏，应用重开后自动再次隐藏（需要 DockPicker 保持运行）。";
  for(NSView *v in @[_appIcon,_nameLabel,_detailLabel,_visibilitySwitch]){v.translatesAutoresizingMaskIntoConstraints=NO;[self addSubview:v];}
  [NSLayoutConstraint activateConstraints:@[
   [_appIcon.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:10],[_appIcon.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],[_appIcon.widthAnchor constraintEqualToConstant:28],[_appIcon.heightAnchor constraintEqualToConstant:28],
@@ -155,12 +154,15 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
 @implementation AppDelegate
 - (void)applicationDidFinishLaunching:(NSNotification*)n{
  [[NSUserDefaults standardUserDefaults]removeObjectForKey:@"runtime.hiddenApplicationPaths"];
- self.hiddenPaths=[NSMutableSet setWithArray:[[NSUserDefaults standardUserDefaults]arrayForKey:HiddenPathsKey]?:@[]];self.hiddenPids=[NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults]dictionaryForKey:HiddenPidsKey]?:@{}];self.hiddenSince=[NSMutableDictionary dictionary];for(NSString *p in self.hiddenPaths)self.hiddenSince[p]=[NSDate date];self.acceptedPaths=[NSMutableSet set];
+ [[NSUserDefaults standardUserDefaults]removeObjectForKey:HiddenPidsKey];
+ self.hiddenPaths=[NSMutableSet setWithArray:[[NSUserDefaults standardUserDefaults]arrayForKey:HiddenPathsKey]?:@[]];self.hiddenPids=[NSMutableDictionary dictionary];self.hiddenSince=[NSMutableDictionary dictionary];self.acceptedPaths=[NSMutableSet set];
  self.entries=@[];[self buildMainMenu];[self buildWindow];[self buildStatusMenu];[self reload:nil];[self showPanel:nil];
  [[NSNotificationCenter defaultCenter]addObserver:self selector:@selector(searchChanged:) name:NSControlTextDidChangeNotification object:self.search];
  [[NSNotificationCenter defaultCenter]addObserver:self selector:@selector(appDidBecomeActive:) name:NSApplicationDidBecomeActiveNotification object:nil];
  [[NSNotificationCenter defaultCenter]addObserver:self selector:@selector(appDidResignActive:) name:NSApplicationDidResignActiveNotification object:nil];
+ [NSWorkspace.sharedWorkspace.notificationCenter addObserver:self selector:@selector(workspaceApplicationDidLaunch:) name:NSWorkspaceDidLaunchApplicationNotification object:nil];
  [NSTimer scheduledTimerWithTimeInterval:3 target:self selector:@selector(timerRefresh:) userInfo:nil repeats:YES];
+ [self applyHiddenChoices];
 }
 - (NSArray<NSDictionary*>*)runningEntries{
  NSMutableArray *rows=[NSMutableArray array];NSString *own=NSBundle.mainBundle.bundleIdentifier;
@@ -180,34 +182,44 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
 - (void)saveChoices{
  NSUserDefaults *u=[NSUserDefaults standardUserDefaults];
  [u setObject:self.hiddenPaths.allObjects forKey:HiddenPathsKey];
- [u setObject:self.hiddenPids forKey:HiddenPidsKey];
+ [u removeObjectForKey:HiddenPidsKey];
  [u synchronize];
 }
 - (void)reconcileHiddenPaths:(NSArray<NSDictionary*>*)running{
- NSMutableSet *live=[NSMutableSet set];for(NSDictionary *entry in running)[live addObject:entry[@"path"]];
- BOOL changed=NO;
- // 应用已不在运行列表：与 Dock 读取无关，无需辅助功能权限即可回收。
- for(NSString *path in self.hiddenPaths.allObjects){
-  if([live containsObject:path])continue;
-  [self.hiddenPaths removeObject:path];[self.hiddenSince removeObjectForKey:path];[self.hiddenPids removeObjectForKey:path];changed=YES;
+ NSMutableDictionary *livePids=[NSMutableDictionary dictionary];
+ for(NSDictionary *entry in running)livePids[entry[@"path"]]=entry[@"pid"];
+ // 只回收进程状态，保留长期规则；应用重开后要对新 PID 再执行隐藏。
+ for(NSString *path in self.hiddenPids.allKeys){
+  if([self.hiddenPaths containsObject:path]&&[self.hiddenPids[path]isEqual:livePids[path]])continue;
+  [self.hiddenPids removeObjectForKey:path];[self.hiddenSince removeObjectForKey:path];
  }
- // 应用被重开过（PID 变了）：隐藏状态不会跟着进程走，图标已自行回来。
+}
+- (void)applyHiddenChoices{
+ // 后台自动执行不弹授权框，也不与用户操作并发。
+ if(self.busy||self.hiddenPaths.count==0||!AXIsProcessTrusted())return;
+ NSArray *running=[self runningEntries];[self reconcileHiddenPaths:running];
+ NSSet *visible=VisibleDockPaths();NSDate *now=[NSDate date];
+ NSMutableArray *targets=[NSMutableArray array];
  for(NSDictionary *entry in running){
-  NSString *path=entry[@"path"];NSNumber *recorded=self.hiddenPids[path];
-  if(!recorded||![self.hiddenPaths containsObject:path])continue;
-  if([recorded intValue]==[entry[@"pid"]intValue])continue;
-  [self.hiddenPaths removeObject:path];[self.hiddenSince removeObjectForKey:path];[self.hiddenPids removeObjectForKey:path];changed=YES;
+  NSString *path=entry[@"path"];
+  if(![self.hiddenPaths containsObject:path])continue;
+  BOOL sameProcess=[self.hiddenPids[path]isEqual:entry[@"pid"]];
+  if(sameProcess&&(!visible||![visible containsObject:path]))continue;
+  NSDate *lastAttempt=self.hiddenSince[path];
+  if(lastAttempt&&[now timeIntervalSinceDate:lastAttempt]<5)continue;
+  self.hiddenSince[path]=now;[targets addObject:entry];
  }
- // 仍运行但 Dock 已重新显示（图标复现）：需要真实 Dock 状态，未授权时跳过。
- if(self.dockPaths){
-  for(NSString *path in self.hiddenPaths.allObjects){
-   if(![self.dockPaths containsObject:path])continue;
-   NSDate *since=self.hiddenSince[path];
-   if(since&&[[NSDate date]timeIntervalSinceDate:since]<=5)continue;
-   [self.hiddenPaths removeObject:path];[self.hiddenSince removeObjectForKey:path];[self.hiddenPids removeObjectForKey:path];changed=YES;
-  }
- }
- if(changed)[self saveChoices];
+ // 启动通知负责尽快响应；定时检查补偿启动时序、忙碌和 Dock 重启。
+ if(targets.count)[self changeEntries:targets shown:NO completion:nil];
+}
+- (void)workspaceApplicationDidLaunch:(NSNotification*)n{
+ NSRunningApplication *app=n.userInfo[NSWorkspaceApplicationKey];NSString *path=app.bundleURL.path;
+ if(!path)return;
+ dispatch_async(dispatch_get_main_queue(),^{
+  if(![self.hiddenPaths containsObject:path])return;
+  [self.hiddenPids removeObjectForKey:path];[self.hiddenSince removeObjectForKey:path];
+  [self applyHiddenChoices];
+ });
 }
 - (BOOL)isEntryShown:(NSDictionary*)entry{
  NSString *path=entry[@"path"];
@@ -228,10 +240,14 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
  if(self.operationMessage.length)self.status.stringValue=self.operationMessage;
   else if(self.dockPaths)self.status.stringValue=[NSString stringWithFormat:@"运行中 %lu · 显示中 %ld · 已隐藏 %lu · 已读取原生 Dock 状态",(unsigned long)all.count,(long)shownCount,(unsigned long)(all.count-shownCount)];
   else{NSInteger selectedHidden=0;for(NSDictionary *entry in all)if([self.hiddenPaths containsObject:entry[@"path"]])selectedHidden++;NSString *why=AXIsProcessTrusted()?@"无法读取 Dock 状态（Dock 层级可能已变，稍后自动重试）":@"未读取 Dock 状态（可在系统设置中授权辅助功能）";self.status.stringValue=[NSString stringWithFormat:@"运行中 %lu · 显示选择 %lu · 隐藏选择 %ld · %@",(unsigned long)all.count,(unsigned long)(all.count-selectedHidden),(long)selectedHidden,why];}
- self.restoreButton.enabled=(all.count-shownCount)>0;
+ self.restoreButton.enabled=(all.count-shownCount)>0||self.hiddenPaths.count>0;
  [self updateStatusMenuStates];
 }
-- (void)timerRefresh:(id)sender{if(self.busy||!self.window.isVisible)return;[self reload:nil];}
+- (void)timerRefresh:(id)sender{
+ if(self.busy)return;
+ [self applyHiddenChoices];
+ if(!self.busy&&self.window.isVisible)[self reload:nil];
+}
 - (void)searchChanged:(NSNotification*)n{[self reload:nil];}
 // 所有会改动 Dock 的操作前统一校验：未授权先弹授权提示并中止，已授权静默继续。
 - (BOOL)ensureAccessibility{
@@ -264,8 +280,10 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
  NSString *path=entry[@"path"];BOOL shown=self.dockPaths?[self.dockPaths containsObject:path]:![self.hiddenPaths containsObject:path];
  cell.appIcon.image=[NSWorkspace.sharedWorkspace iconForFile:path];cell.nameLabel.stringValue=entry[@"name"];cell.nameLabel.textColor=shown?NSColor.labelColor:NSColor.secondaryLabelColor;
  cell.detailLabel.stringValue=[NSString stringWithFormat:@"%@ · PID %@",shown?@"Dock 中显示":@"Dock 中隐藏",entry[@"pid"]];
+ BOOL autoHide=[self.hiddenPaths containsObject:path];
+ if(autoHide&&shown)cell.detailLabel.stringValue=[NSString stringWithFormat:@"Dock 中显示 · 等待自动隐藏 · PID %@",entry[@"pid"]];
  if(!self.dockPaths)cell.detailLabel.stringValue=[NSString stringWithFormat:@"%@ · PID %@",shown?@"显示选择":@"隐藏选择（未核验）",entry[@"pid"]];
- cell.toolTip=path;cell.visibilitySwitch.state=shown?NSControlStateValueOn:NSControlStateValueOff;cell.visibilitySwitch.enabled=!self.busy;
+ cell.toolTip=path;cell.visibilitySwitch.state=shown&&!autoHide?NSControlStateValueOn:NSControlStateValueOff;cell.visibilitySwitch.enabled=!self.busy;
  cell.visibilitySwitch.target=self;cell.visibilitySwitch.action=@selector(toggle:);objc_setAssociatedObject(cell.visibilitySwitch,EntryKey,entry,OBJC_ASSOCIATION_RETAIN_NONATOMIC);return cell;
 }
 - (void)changeEntries:(NSArray<NSDictionary*>*)entries shown:(BOOL)shown completion:(void(^)(BOOL))completion{
@@ -279,12 +297,12 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
 
   if(visible){for(NSDictionary *entry in successful){NSRunningApplication *app=[NSRunningApplication runningApplicationWithProcessIdentifier:[entry[@"pid"]intValue]];if(!app||app.terminated)continue;if([visible containsObject:entry[@"path"]]!=shown){[errors addObject:[NSString stringWithFormat:@"%@ 的 Dock 状态未通过核验。",entry[@"name"]]];[failed addObject:entry];}}}
   dispatch_async(dispatch_get_main_queue(),^{
-   for(NSDictionary *entry in successful){if([failed containsObject:entry])continue;NSString *p=entry[@"path"];if(shown){[self.hiddenPaths removeObject:p];[self.hiddenSince removeObjectForKey:p];}else{[self.hiddenPaths addObject:p];self.hiddenSince[p]=[NSDate date];}}
+   for(NSDictionary *entry in successful){if([failed containsObject:entry])continue;NSString *p=entry[@"path"];if(shown){[self.hiddenPaths removeObject:p];[self.hiddenSince removeObjectForKey:p];[self.hiddenPids removeObjectForKey:p];}else{[self.hiddenPaths addObject:p];self.hiddenSince[p]=[NSDate date];if(visible)self.hiddenPids[p]=entry[@"pid"];}}
    [self saveChoices];self.busy=NO;self.refreshButton.enabled=YES;
    BOOL ok=errors.count==0&&visible!=nil;
    if(errors.count)self.operationMessage=[errors componentsJoinedByString:@" "];
    else if(!visible)self.operationMessage=@"已发送请求，但未能读取 Dock 实际状态；请稍后刷新确认。";
-   else self.operationMessage=shown?@"已恢复：Dock 图标已显示。":@"已完成：Dock 图标已隐藏。";
+   else self.operationMessage=shown?@"已恢复：Dock 图标已显示，已取消自动隐藏。":@"已完成：Dock 图标已隐藏，应用重开后会自动再次隐藏。";
    [self reload:nil];if(completion)completion(ok);
   });
  });
@@ -302,11 +320,11 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
  NSMutableArray *targets=[NSMutableArray array];
  for(NSDictionary *e in[self runningEntries]){
   BOOL shown=visible?[visible containsObject:e[@"path"]]:![self.hiddenPaths containsObject:e[@"path"]];
-  if(!shown)[targets addObject:e];
+  if(!shown||[self.hiddenPaths containsObject:e[@"path"]])[targets addObject:e];
  }
  if(targets.count==0){
-  if(visible){[self.hiddenPaths removeAllObjects];[self.hiddenSince removeAllObjects];[self.hiddenPids removeAllObjects];[self saveChoices];}
-  self.operationMessage=visible?@"没有需要恢复的应用：运行中的应用都已在 Dock 中显示。":@"无法读取 Dock 状态，请稍后重试。";
+  [self.hiddenPaths removeAllObjects];[self.hiddenSince removeAllObjects];[self.hiddenPids removeAllObjects];[self saveChoices];
+  self.operationMessage=visible?@"已取消全部自动隐藏规则；运行中的应用都已在 Dock 中显示。":@"已取消全部自动隐藏规则；未能读取 Dock 状态，请稍后刷新确认。";
   [self reload:nil];return;
  }
  [self changeEntries:targets shown:YES completion:^(BOOL ok){if(ok){[self.hiddenPaths removeAllObjects];[self.hiddenSince removeAllObjects];[self.hiddenPids removeAllObjects];[self saveChoices];}[self reload:nil];}];
@@ -330,7 +348,7 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
 - (BOOL)applicationShouldHandleReopen:(NSApplication*)sender hasVisibleWindows:(BOOL)visible{[self showPanel:nil];return YES;}
 - (void)help:(id)sender{
  NSAlert *a=[NSAlert new];a.messageText=@"DockPicker 说明";
- a.informativeText=@"只管理当前运行应用在原生 Dock 中的图标显示；不会修改、重签名或重启应用，也不需要管理员密码。\n\n首次隐藏每个应用前都会单独确认。显示状态可能影响 Dock 的最小化窗口、桌面空间等内部记录；不同应用和未来 macOS 版本的表现可能不同。\n\n点击列表上方的“全部 / 显示中 / 已隐藏”时会检查辅助功能权限，未授权会自动提示开启。该权限只用于核对 Dock 图标状态；未授权时，列表显示的是本工具保存的选择。\n\n菜单栏 ▦ 的下拉列表会列出全部运行中的应用，勾选表示当前显示在 Dock 中，点一下即可直接显示或隐藏；每次切换前同样先校验辅助功能权限，已授权不会再弹提示。\n\n如果提示“Dock 状态未通过核验”，一般是因为该应用已固定在 Dock 栏。右键点击该应用的 Dock 图标，在“选项”中取消“在程序坞中保留”，然后重试即可。\n\n应用或 Dock 重启后图标可能重新出现；“全部恢复”可重新显示。直接退出本工具会保持当前的隐藏状态；需要还原时用菜单中的“恢复并退出”。";[a runModal];
+ a.informativeText=@"只管理当前运行应用在原生 Dock 中的图标显示；不会修改、重签名或重启应用，也不需要管理员密码。\n\n首次隐藏每个应用前都会单独确认。显示状态可能影响 Dock 的最小化窗口、桌面空间等内部记录；不同应用和未来 macOS 版本的表现可能不同。\n\n点击列表上方的“全部 / 显示中 / 已隐藏”时会检查辅助功能权限，未授权会自动提示开启。该权限只用于核对 Dock 图标状态；未授权时，列表显示的是本工具保存的选择。\n\n菜单栏 ▦ 的下拉列表会列出全部运行中的应用。取消勾选会持续隐藏；重新勾选会显示并取消自动隐藏。列表开关遵循同一规则，文字状态仍以实际 Dock 核验结果为准；每次切换前会校验辅助功能权限。\n\n如果提示“Dock 状态未通过核验”，一般是因为该应用已固定在 Dock 栏。右键点击该应用的 Dock 图标，在“选项”中取消“在程序坞中保留”，然后重试即可。\n\n隐藏选择会长期保存。只要 DockPicker 保持运行，应用重开、Dock 重启或控制面板收起后都会自动补做隐藏；启动瞬间图标仍可能短暂出现。自动处理失败时保留规则并稍后重试，不弹授权框。开启开关会取消该应用的规则；“全部恢复”和“恢复并退出”成功后会清除全部规则，包括未运行应用。直接退出本工具会保持当前隐藏状态，但退出期间无法自动处理新启动的应用，下次启动 DockPicker 后会继续执行规则。";[a runModal];
 }
 - (void)busyNotice:(NSString*)action{
  self.operationMessage=[NSString stringWithFormat:@"正在处理 Dock 图标变更，请稍后再%@。",action];
@@ -380,7 +398,7 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
   if(item.action!=@selector(toggleFromMenu:))continue;
   NSDictionary *entry=item.representedObject;
   NSNumber *pending=self.pendingMenuStates[entry[@"path"]];
-  BOOL shown=pending?pending.boolValue:[self isEntryShown:entry];
+  BOOL shown=pending?pending.boolValue:(![self.hiddenPaths containsObject:entry[@"path"]]&&[self isEntryShown:entry]);
   item.state=shown?NSControlStateValueOn:NSControlStateValueOff;
   item.enabled=!self.busy;
  }
@@ -422,7 +440,7 @@ static BOOL WaitForDockState(NSArray *entries,BOOL shown,NSTimeInterval timeout,
 - (void)buildWindow{
  self.window=[[NSWindow alloc]initWithContentRect:NSMakeRect(0,0,660,570) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];self.window.title=@"DockPicker — 管理应用在原生 Dock 的显示";self.window.releasedWhenClosed=NO;self.window.minSize=NSMakeSize(700,380);[self.window center];NSView*c=self.window.contentView;
  NSTextField *title=[NSTextField labelWithString:@"选择应用在原生 Dock 中的显示"];title.font=[NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
- NSTextField *subtitle=[NSTextField labelWithString:@"DockPicker 1.0.1 · 直接控制原生 Dock，不改应用文件"];subtitle.font=[NSFont systemFontOfSize:11];subtitle.textColor=NSColor.secondaryLabelColor;
+ NSTextField *subtitle=[NSTextField labelWithString:@"DockPicker 1.0.2 Preview 1 · 直接控制原生 Dock，不改应用文件"];subtitle.font=[NSFont systemFontOfSize:11];subtitle.textColor=NSColor.secondaryLabelColor;
  self.search=[NSSearchField new];self.search.placeholderString=@"搜索运行中的应用";
   self.filterControl=[NSSegmentedControl segmentedControlWithLabels:@[@"全部",@"显示中",@"已隐藏"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(filterChanged:)];self.filterControl.selectedSegment=0;self.filterControl.toolTip=@"筛选当前运行中的应用";
  self.refreshButton=[NSButton buttonWithTitle:@"刷新" target:self action:@selector(reload:)];self.restoreButton=[NSButton buttonWithTitle:@"全部恢复" target:self action:@selector(restoreAll:)];
