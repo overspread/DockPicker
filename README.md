@@ -1,11 +1,10 @@
-# DockPicker 1.0.2 Preview 2
+# DockPicker 1.0.2
 
 DockPicker 是一个 macOS 菜单栏工具，用于控制**当前正在运行的应用**是否显示在原生 Dock 中。
 
-当前预览版为 **1.0.2-preview.2**，沿用持续隐藏功能并修正发布签名；最新正式版仍为 **1.0.1**。
+当前正式版为 **1.0.2**，新增持续隐藏规则及应用重开自动隐藏，沿用原固定签名身份。
 
-- [下载 1.0.2-preview.2 预览版及查看更新说明](https://github.com/overspread/DockPicker/releases/tag/v1.0.2-preview.2)
-- [下载 1.0.1 正式版](https://github.com/overspread/DockPicker/releases/tag/v1.0.1)
+- [下载 1.0.2 正式版及查看更新说明](https://github.com/overspread/DockPicker/releases/tag/v1.0.2)
 - [完整更新日志](CHANGELOG.md)
 
 它通过未公开的 LaunchServices 通知实现；Apple 可能会在未来 macOS 更新中改变该行为，不同应用的兼容性也可能不同。
@@ -29,7 +28,7 @@ DockPicker 是一个 macOS 菜单栏工具，用于控制**当前正在运行的
 
 正式版 1.0.1 曾在 macOS 27.2.1（build 26B131，Apple Silicon）本地验证。应用包声明的最低版本是 macOS 27.0；其他 macOS 版本和 Intel Mac 未经测试。
 
-本预览版完成编译、原固定证书签名、签名校验和安装包结构核验；自动隐藏的应用重开、Dock 重启和权限变化场景尚未完成独立的完整运行验证，欢迎测试后反馈。
+1.0.2 的 Preview 2 已由维护者实际使用并确认操作正常，正式版沿用相同功能；正式版完成编译、原固定证书签名、签名校验和安装包结构核验。该反馈不代表所有应用、Dock 重启或权限变化场景均已覆盖，其他 macOS 版本和 Intel Mac 未经验证。
 
 **未来 macOS 更新可能导致本工具失效或行为变化。** 该通知机制未公开，Apple 随时可能修改或移除相关行为。系统更新后，请先确认隐藏功能仍然有效。
 
@@ -55,11 +54,11 @@ DockPicker 会在当前会话中首次通过列表隐藏每个应用前单独确
 
 ## 发布
 
-预览版：**1.0.2-preview.2**，GitHub 标记为 **Pre-release**；正式版 **1.0.1** 保持 **Latest**。更新内容按新增功能、功能调整、移除功能和 Bug 修复记录在 GitHub 发布页及本仓库更新日志中。
+正式版：**1.0.2**，GitHub 标记为 **Latest**。更新内容按新增功能、功能调整、移除功能和 Bug 修复记录在 GitHub 发布页及本仓库更新日志中；历史预览版记录与附件保留。
 
-预览应用包版本为 `1.0.2`（build `4`），界面标注 **Preview 2**；下载附件为 `DockPicker-1.0.2-preview.2.pkg`，安装到“应用程序”并替换原 DockPicker。安装前请先退出正在运行的 DockPicker。
+应用包版本为 `1.0.2`（build `5`），界面显示 **DockPicker 1.0.2**；下载附件为 `DockPicker-1.0.2.pkg`，安装到“应用程序”并替换原 DockPicker。安装前请先退出正在运行的 DockPicker。
 
-**本次应用包恢复使用原固定自签名证书及私钥，未使用 Developer ID 签名，也未经过 Apple 公证；PKG 安装器本身未签名。** Preview 1 曾错误采用 ad-hoc 临时签名，并将原签名材料误判为不可用；现已确认原身份保存在发布者的登录钥匙串中，Preview 2 复用同一身份，未新建证书。
+**应用包沿用原固定自签名证书及私钥，未使用 Developer ID 签名，也未经过 Apple 公证；PKG 安装器本身未签名。** Preview 1 曾错误采用 ad-hoc 临时签名，并将原签名材料误判为不可用；Preview 2 已修正。正式版继续复用保存在发布者登录钥匙串中的原身份，未新建证书。
 
 从 Preview 1 的临时签名切换回来，仍可能需要重新授权一次。安装后如授权无效，请在“系统设置 → 隐私与安全性 → 辅助功能”中移除旧 DockPicker，再添加当前“应用程序”里的 DockPicker。保持同一证书和应用标识有助于后续更新沿用授权，但不能保证所有系统环境都无需重新授权。
 
